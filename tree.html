@@ -73,6 +73,13 @@
     transform-box: fill-box;
     transform-origin: 50% 100%;
   }
+  #tree { transform-box: view-box; transform-origin: 44% 85%; }
+  #tree.shake { animation: treeshake 0.5s ease-out; }
+  @keyframes treeshake {
+    0% { transform: rotate(0); } 20% { transform: rotate(1.3deg); }
+    40% { transform: rotate(-1deg); } 60% { transform: rotate(0.7deg); }
+    80% { transform: rotate(-0.4deg); } 100% { transform: rotate(0); }
+  }
   #fly { cursor: pointer; }
   #fly.flying { cursor: default; }
   .wing { animation: buzz 0.12s linear infinite alternate; transform-box: fill-box; transform-origin: center; }
@@ -158,14 +165,27 @@
 
   // ---- Grow the binary tree: 4 fork levels -> 16 tips ----
   // First fork = most significant bit; bit 0 = left, bit 1 = right.
-  const segs = [], tips = new Array(16);
+  // Deterministic jitter + curved branches so the tree reads as organic,
+  // not as a textbook binary fan.
+  const rnd = s => { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x); };
+  const segs = [], tips = new Array(16), forks = [];
   (function grow(x, y, angle, level, path, idx) {
     if (level === 4) { tips[idx] = { x, y, angle, path }; return; }
+    forks.push({ x, y, angle, level });
     for (const b of [0, 1]) {
-      const a = angle + (b ? SPREAD[level] : -SPREAD[level]);
-      const nx = x + LEN[level] * Math.sin(a);
-      const ny = y - LEN[level] * Math.cos(a);
-      segs.push({ x1: x, y1: y, x2: nx, y2: ny, level });
+      const seed = idx * 37 + level * 11 + b * 53;
+      let a = angle + (b ? SPREAD[level] : -SPREAD[level]) + (rnd(seed) - 0.5) * 0.2;
+      a = Math.max(-1.32, Math.min(1.32, a));
+      const L = LEN[level] * (0.84 + rnd(seed + 1) * 0.32);
+      const nx = x + L * Math.sin(a);
+      const ny = y - L * Math.cos(a);
+      const px = -(ny - y) / L, py = (nx - x) / L;      // unit perpendicular
+      const bow = (rnd(seed + 2) - 0.5) * 30;
+      segs.push({
+        x1: x, y1: y,
+        cx: (x + nx) / 2 + px * bow, cy: (y + ny) / 2 + py * bow,
+        x2: nx, y2: ny, level,
+      });
       grow(nx, ny, a, level + 1, [...path, [nx, ny]], (idx << 1) | b);
     }
   })(TRUNK_X, TRUNK_TOP, 0, 0, [HOLE, [TRUNK_X, TRUNK_TOP]], 0);
@@ -175,17 +195,20 @@
   el('rect', { x: 0, y: GROUND_Y, width: 1000, height: 120, fill: '#b6b2a2' });
   el('line', { x1: 0, y1: GROUND_Y, x2: 1000, y2: GROUND_Y, stroke: 'var(--ink)', 'stroke-width': 5 });
 
+  const treeG = el('g', { id: 'tree' });
+
   // trunk (tapered) + branches: black outline pass, then brown pass
   const trunkD = `M ${TRUNK_X-24},${GROUND_Y+4} C ${TRUNK_X-16},${GROUND_Y-80} ${TRUNK_X-13},${TRUNK_TOP+40} ${TRUNK_X-10},${TRUNK_TOP}
                   L ${TRUNK_X+10},${TRUNK_TOP} C ${TRUNK_X+13},${TRUNK_TOP+40} ${TRUNK_X+16},${GROUND_Y-80} ${TRUNK_X+24},${GROUND_Y+4} Z`;
   for (const pass of ['outline', 'fill']) {
     for (const s of segs) {
-      el('line', {
-        x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2,
+      el('path', {
+        d: `M ${s.x1} ${s.y1} Q ${s.cx} ${s.cy} ${s.x2} ${s.y2}`,
+        fill: 'none',
         stroke: pass === 'outline' ? 'var(--ink)' : 'var(--branch)',
         'stroke-width': WIDTH[s.level] + (pass === 'outline' ? 7 : 0),
         'stroke-linecap': 'round',
-      });
+      }, treeG);
     }
     el('path', {
       d: trunkD,
@@ -193,10 +216,19 @@
       stroke: pass === 'outline' ? 'var(--ink)' : 'none',
       'stroke-width': 8, 'stroke-linejoin': 'round',
       transform: pass === 'outline' ? '' : 'translate(0 -1)',
-    });
+    }, treeG);
+  }
+  // decorative dead twigs at some forks — breaks the symmetric pattern
+  for (const f of forks) {
+    if (f.level < 1 || rnd(f.x * 3.7 + f.y) < 0.4) continue;
+    const a = f.angle + (rnd(f.x + f.y * 2) - 0.5) * 2.4;
+    const L = 15 + rnd(f.y + 5) * 14;
+    const tx = f.x + L * Math.sin(a), ty = f.y - L * Math.cos(a);
+    el('line', { x1: f.x, y1: f.y, x2: tx, y2: ty, stroke: 'var(--ink)', 'stroke-width': 3, 'stroke-linecap': 'round' }, treeG);
+    el('ellipse', { cx: tx, cy: ty, rx: 3, ry: 7, fill: 'var(--ink)', transform: `rotate(${a * 57.3} ${tx} ${ty})` }, treeG);
   }
   // hollow
-  el('ellipse', { cx: HOLE[0], cy: HOLE[1], rx: 11, ry: 22, fill: '#0a0705', stroke: 'var(--ink)', 'stroke-width': 4 });
+  el('ellipse', { cx: HOLE[0], cy: HOLE[1], rx: 11, ry: 22, fill: '#0a0705', stroke: 'var(--ink)', 'stroke-width': 4 }, treeG);
 
   // ---- Tips: flowers & leaves ----
   const flowerEls = {}; // tip idx -> group
@@ -211,7 +243,7 @@
   };
   for (let i = 0; i < 16; i++) {
     const t = tips[i];
-    const g = el('g', { transform: `translate(${t.x} ${t.y})` });
+    const g = el('g', { transform: `translate(${t.x} ${t.y})` }, treeG);
     if (FLOWERS.includes(i)) {
       const fg = el('g', { transform: `rotate(${t.angle * 57.3})` }, g);
       // petals (hidden until bloom)
@@ -313,27 +345,31 @@
     if (busy) return;
     busy = true;
     fly.classList.add('flying');
-    const tip = tips[leverValue()];
+    const idx = leverValue();
+    const tip = tips[idx];
+    const out = (d) => [tip.x + d * Math.sin(tip.angle), tip.y - d * Math.cos(tip.angle)];
     animateAlong([FLY_HOME, [HOLE[0] - 60, HOLE[1] - 40], HOLE], 320, () => {
       fly.style.display = 'none';               // vanished into the hollow
       wait(380, () => {                         // flying unseen inside the trunk...
         fly.style.display = '';
-        // ...then bursts straight out of the branch tip
+        // ...then bursts out of the branch tip and zooms away
         const lastSeg = tip.path[tip.path.length - 2];
-        const out = (d) => [tip.x + d * Math.sin(tip.angle), tip.y - d * Math.cos(tip.angle)];
-        animateAlong([lastSeg, [tip.x, tip.y], out(46), out(20)], 950, () => {
-          const idx = leverValue();
+        animateAlong([lastSeg, [tip.x, tip.y]], 900, () => {
+          shakeTree();
           if (FLOWERS.includes(idx) && !bloomed.has(idx)) {
             bloomed.add(idx);
             flowerEls[idx].classList.add('bloom');
             bloomCountEl.textContent = bloomed.size;
           }
-          wait(420, () => {
-            animateAlong([out(20), [tip.x - 50, tip.y + 40], FLY_HOME], 420, () => {
+          animateAlong([[tip.x, tip.y], out(300)], 1100, () => {
+            fly.style.display = 'none';         // gone into the sky
+            wait(650, () => {
+              setFly(...FLY_HOME);              // ...and back home
+              fly.style.display = '';
               busy = false;
               fly.classList.remove('flying');
               if (bloomed.size === FLOWERS.length)
-                wait(500, () => overlay.classList.add('show'));
+                wait(400, () => overlay.classList.add('show'));
             });
           });
         });
@@ -341,6 +377,14 @@
     });
   }
   fly.addEventListener('click', launch);
+
+  function shakeTree() {
+    if (INSTANT) return;
+    treeG.classList.remove('shake');
+    void treeG.getBoundingClientRect();
+    treeG.classList.add('shake');
+    setTimeout(() => treeG.classList.remove('shake'), 550);
+  }
 
   function reset() {
     bloomed.clear();
