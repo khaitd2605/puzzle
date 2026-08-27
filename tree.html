@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Binary Tree</title>
+<title>Cây Hoa</title>
 <style>
   :root {
     --ink: #1a140e;
@@ -128,7 +128,7 @@
 <div id="overlay">
   <div class="card">
     <h1>🌸 Cây đã nở hết hoa!</h1>
-    <p>Anh đã giải mã cả <b>7</b> tổ hợp nhị phân 👏</p>
+    <p>Anh đã tìm ra cả <b>7</b> bí mật của cái cây 👏</p>
     <button id="btn-again">Chơi lại</button>
   </div>
 </div>
@@ -316,17 +316,20 @@
     const tip = tips[leverValue()];
     animateAlong([FLY_HOME, [HOLE[0] - 60, HOLE[1] - 40], HOLE], 320, () => {
       fly.style.display = 'none';               // vanished into the hollow
-      wait(420, () => {
+      wait(380, () => {                         // flying unseen inside the trunk...
         fly.style.display = '';
-        animateAlong(tip.path, 300, () => {     // emerges along the branches
+        // ...then bursts straight out of the branch tip
+        const lastSeg = tip.path[tip.path.length - 2];
+        const out = (d) => [tip.x + d * Math.sin(tip.angle), tip.y - d * Math.cos(tip.angle)];
+        animateAlong([lastSeg, [tip.x, tip.y], out(46), out(20)], 950, () => {
           const idx = leverValue();
           if (FLOWERS.includes(idx) && !bloomed.has(idx)) {
             bloomed.add(idx);
             flowerEls[idx].classList.add('bloom');
             bloomCountEl.textContent = bloomed.size;
           }
-          wait(450, () => {
-            animateAlong([[tip.x, tip.y], [tip.x - 40, tip.y + 30], FLY_HOME], 380, () => {
+          wait(420, () => {
+            animateAlong([out(20), [tip.x - 50, tip.y + 40], FLY_HOME], 420, () => {
               busy = false;
               fly.classList.remove('flying');
               if (bloomed.size === FLOWERS.length)
