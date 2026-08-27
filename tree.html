@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Binary Tree</title>
+<style>
+  :root {
+    --ink: #1a140e;
+    --wood: #8d7f6f;
+    --branch: #c9a06a;
+    --pink: #f2cdd9;
+    --cream: #f0ead9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      repeating-linear-gradient(90deg,
+        var(--wood) 0 120px, #837565 120px 124px,
+        #94867a 124px 250px, #7d7060 250px 254px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    overflow: hidden;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 140px 40px rgba(20, 10, 5, 0.75);
+  }
+  #stage { width: 100%; max-width: 1000px; }
+  svg { display: block; width: 100%; height: auto; }
+
+  .hud {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    z-index: 5;
+  }
+  .hud a, .hud button {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border: 3px solid var(--ink);
+    border-radius: 10px;
+    background: var(--cream);
+    color: var(--ink);
+    cursor: pointer;
+    text-decoration: none;
+    box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  }
+  .hud .count {
+    font-size: 15px;
+    font-weight: 700;
+    background: var(--cream);
+    border: 3px solid var(--ink);
+    border-radius: 10px;
+    padding: 7px 14px;
+  }
+
+  .lever { cursor: pointer; }
+  .lever .plank {
+    transition: transform 0.18s ease-out;
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+  }
+  #fly { cursor: pointer; }
+  #fly.flying { cursor: default; }
+  .wing { animation: buzz 0.12s linear infinite alternate; transform-box: fill-box; transform-origin: center; }
+  @keyframes buzz { from { transform: rotate(-18deg); } to { transform: rotate(14deg); } }
+
+  .petal, .bud, .bloom-center {
+    transition: transform 0.5s cubic-bezier(0.2, 1.5, 0.4, 1), opacity 0.3s;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  .bloom .bud { transform: scale(0); opacity: 0; }
+  .bloom .petal { transform: scale(1) !important; }
+  .bloom .bloom-center { transform: scale(1) !important; }
+
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(20, 14, 8, 0.6);
+    display: none; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  #overlay.show { display: flex; }
+  #overlay .card {
+    background: var(--cream);
+    border: 5px solid var(--ink);
+    border-radius: 14px;
+    padding: 36px 48px;
+    text-align: center;
+    animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  @keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  #overlay h1 { font-size: 30px; margin-bottom: 8px; }
+  #overlay p { font-size: 17px; margin-bottom: 20px; }
+  #overlay button {
+    font: inherit; font-weight: 600;
+    padding: 8px 18px;
+    border: 3px solid var(--ink); border-radius: 10px;
+    background: white; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <a href="index.html">🏠 Menu</a>
+  <button id="btn-reset">⟲ Reset</button>
+  <div class="count">🌸 <span id="bloom-count">0</span>/<span id="bloom-total">7</span></div>
+</div>
+
+<div id="stage">
+  <svg id="scene" viewBox="0 0 1000 780"></svg>
+</div>
+
+<div id="overlay">
+  <div class="card">
+    <h1>🌸 Cây đã nở hết hoa!</h1>
+    <p>Anh đã giải mã cả <b>7</b> tổ hợp nhị phân 👏</p>
+    <button id="btn-again">Chơi lại</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const SVG = 'http://www.w3.org/2000/svg';
+  const scene = document.getElementById('scene');
+  const INSTANT = location.hash === '#autotest';
+
+  // ---- Level data ----
+  const FLOWERS = [1, 4, 6, 9, 11, 13, 14]; // tip indices (0-15) that carry a flower bud
+  const GROUND_Y = 662;
+  const TRUNK_X = 440, TRUNK_TOP = 508;
+  const HOLE = [TRUNK_X, 600];
+  const FLY_HOME = [110, 646];
+  const SPREAD = [0.50, 0.40, 0.30, 0.22];   // radians per fork level
+  const LEN    = [128, 104, 84, 66];
+  const WIDTH  = [19, 12, 7.5, 4.5];
+
+  function el(name, attrs, parent = scene) {
+    const e = document.createElementNS(SVG, name);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  }
+
+  // ---- Grow the binary tree: 4 fork levels -> 16 tips ----
+  // First fork = most significant bit; bit 0 = left, bit 1 = right.
+  const segs = [], tips = new Array(16);
+  (function grow(x, y, angle, level, path, idx) {
+    if (level === 4) { tips[idx] = { x, y, angle, path }; return; }
+    for (const b of [0, 1]) {
+      const a = angle + (b ? SPREAD[level] : -SPREAD[level]);
+      const nx = x + LEN[level] * Math.sin(a);
+      const ny = y - LEN[level] * Math.cos(a);
+      segs.push({ x1: x, y1: y, x2: nx, y2: ny, level });
+      grow(nx, ny, a, level + 1, [...path, [nx, ny]], (idx << 1) | b);
+    }
+  })(TRUNK_X, TRUNK_TOP, 0, 0, [HOLE, [TRUNK_X, TRUNK_TOP]], 0);
+
+  // ---- Draw scene ----
+  // ground
+  el('rect', { x: 0, y: GROUND_Y, width: 1000, height: 120, fill: '#b6b2a2' });
+  el('line', { x1: 0, y1: GROUND_Y, x2: 1000, y2: GROUND_Y, stroke: 'var(--ink)', 'stroke-width': 5 });
+
+  // trunk (tapered) + branches: black outline pass, then brown pass
+  const trunkD = `M ${TRUNK_X-24},${GROUND_Y+4} C ${TRUNK_X-16},${GROUND_Y-80} ${TRUNK_X-13},${TRUNK_TOP+40} ${TRUNK_X-10},${TRUNK_TOP}
+                  L ${TRUNK_X+10},${TRUNK_TOP} C ${TRUNK_X+13},${TRUNK_TOP+40} ${TRUNK_X+16},${GROUND_Y-80} ${TRUNK_X+24},${GROUND_Y+4} Z`;
+  for (const pass of ['outline', 'fill']) {
+    for (const s of segs) {
+      el('line', {
+        x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2,
+        stroke: pass === 'outline' ? 'var(--ink)' : 'var(--branch)',
+        'stroke-width': WIDTH[s.level] + (pass === 'outline' ? 7 : 0),
+        'stroke-linecap': 'round',
+      });
+    }
+    el('path', {
+      d: trunkD,
+      fill: pass === 'outline' ? 'var(--ink)' : 'var(--branch)',
+      stroke: pass === 'outline' ? 'var(--ink)' : 'none',
+      'stroke-width': 8, 'stroke-linejoin': 'round',
+      transform: pass === 'outline' ? '' : 'translate(0 -1)',
+    });
+  }
+  // hollow
+  el('ellipse', { cx: HOLE[0], cy: HOLE[1], rx: 11, ry: 22, fill: '#0a0705', stroke: 'var(--ink)', 'stroke-width': 4 });
+
+  // ---- Tips: flowers & leaves ----
+  const flowerEls = {}; // tip idx -> group
+  const bloomed = new Set();
+  const leafShape = (g, angle) => {
+    for (const side of [-0.5, 0.5]) {
+      el('ellipse', {
+        cx: 0, cy: -8, rx: 3.2, ry: 8, fill: 'var(--ink)',
+        transform: `rotate(${(angle + side) * 57.3} 0 0) translate(0 -2)`,
+      }, g);
+    }
+  };
+  for (let i = 0; i < 16; i++) {
+    const t = tips[i];
+    const g = el('g', { transform: `translate(${t.x} ${t.y})` });
+    if (FLOWERS.includes(i)) {
+      const fg = el('g', { transform: `rotate(${t.angle * 57.3})` }, g);
+      // petals (hidden until bloom)
+      for (let p = 0; p < 5; p++) {
+        el('ellipse', {
+          class: 'petal', cx: 0, cy: -13, rx: 7, ry: 13,
+          fill: 'var(--pink)', stroke: 'var(--ink)', 'stroke-width': 3,
+          transform: `rotate(${p * 72})`, style: 'transform:scale(0)',
+        }, fg);
+      }
+      el('circle', {
+        class: 'bloom-center', cx: 0, cy: 0, r: 6.5,
+        fill: '#f7e8a0', stroke: 'var(--ink)', 'stroke-width': 3,
+        style: 'transform:scale(0)',
+      }, fg);
+      // bud
+      el('ellipse', {
+        class: 'bud', cx: 0, cy: -12, rx: 7.5, ry: 14,
+        fill: 'var(--pink)', stroke: 'var(--ink)', 'stroke-width': 4,
+      }, fg);
+      flowerEls[i] = fg;
+    } else {
+      leafShape(g, t.angle);
+    }
+  }
+
+  // ---- Levers (4 bits, MSB leftmost; left = 0, right = 1) ----
+  const bits = [0, 0, 0, 0];
+  const leverEls = [];
+  for (let i = 0; i < 4; i++) {
+    const x = 690 + i * 72;
+    const g = el('g', { class: 'lever', transform: `translate(${x} ${GROUND_Y})` });
+    const plank = el('g', { class: 'plank' }, g);
+    el('rect', {
+      x: -11, y: -86, width: 22, height: 88, rx: 3,
+      fill: '#a08770', stroke: 'var(--ink)', 'stroke-width': 4,
+    }, plank);
+    el('path', { // small arrow
+      d: 'M 0,-66 L 0,-34 M -6,-58 L 0,-66 L 6,-58',
+      fill: 'none', stroke: '#6e5c48', 'stroke-width': 4, 'stroke-linecap': 'round',
+    }, plank);
+    // generous invisible hit area
+    el('rect', { x: -34, y: -110, width: 68, height: 114, fill: 'transparent' }, g);
+    leverEls.push(plank);
+    g.addEventListener('click', () => {
+      bits[i] ^= 1;
+      renderLevers();
+    });
+  }
+  function renderLevers() {
+    bits.forEach((b, i) => {
+      leverEls[i].style.transform = `rotate(${b ? 24 : -24}deg)`;
+    });
+  }
+  renderLevers();
+  const leverValue = () => (bits[0] << 3) | (bits[1] << 2) | (bits[2] << 1) | bits[3];
+
+  // ---- Fly ----
+  const fly = el('g', { id: 'fly' });
+  el('circle', { cx: 0, cy: 0, r: 26, fill: 'transparent' }, fly); // hit area
+  el('ellipse', { cx: 0, cy: 0, rx: 10, ry: 7, fill: 'var(--ink)' }, fly);
+  el('circle', { cx: 9, cy: -3, r: 4.5, fill: 'var(--ink)' }, fly);
+  el('ellipse', { class: 'wing', cx: -3, cy: -9, rx: 10, ry: 4.5, fill: 'rgba(240,240,255,0.75)', stroke: 'var(--ink)', 'stroke-width': 1.5 }, fly);
+  const setFly = (x, y) => fly.setAttribute('transform', `translate(${x} ${y})`);
+  setFly(...FLY_HOME);
+
+  let busy = false;
+
+  function animateAlong(points, speed, done) {
+    if (INSTANT) { const [x, y] = points[points.length - 1]; setFly(x, y); done(); return; }
+    // piecewise-linear path with a sinusoidal wobble
+    const lens = [];
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+      const d = Math.hypot(points[i][0] - points[i-1][0], points[i][1] - points[i-1][1]);
+      lens.push(d); total += d;
+    }
+    const dur = total / speed * 1000;
+    const t0 = performance.now();
+    (function frame(now) {
+      const t = Math.min(1, (now - t0) / dur);
+      let dist = t * total, i = 0;
+      while (i < lens.length - 1 && dist > lens[i]) dist -= lens[i++];
+      const f = lens[i] ? dist / lens[i] : 1;
+      const [x1, y1] = points[i], [x2, y2] = points[i + 1];
+      const x = x1 + (x2 - x1) * f, y = y1 + (y2 - y1) * f;
+      const wob = Math.sin(t * 26) * 3.5 * (1 - t * 0.5);
+      setFly(x, y + wob);
+      if (t < 1) requestAnimationFrame(frame); else done();
+    })(t0);
+  }
+  const wait = (ms, fn) => INSTANT ? fn() : setTimeout(fn, ms);
+
+  const bloomCountEl = document.getElementById('bloom-count');
+  document.getElementById('bloom-total').textContent = FLOWERS.length;
+  const overlay = document.getElementById('overlay');
+
+  function launch() {
+    if (busy) return;
+    busy = true;
+    fly.classList.add('flying');
+    const tip = tips[leverValue()];
+    animateAlong([FLY_HOME, [HOLE[0] - 60, HOLE[1] - 40], HOLE], 320, () => {
+      fly.style.display = 'none';               // vanished into the hollow
+      wait(420, () => {
+        fly.style.display = '';
+        animateAlong(tip.path, 300, () => {     // emerges along the branches
+          const idx = leverValue();
+          if (FLOWERS.includes(idx) && !bloomed.has(idx)) {
+            bloomed.add(idx);
+            flowerEls[idx].classList.add('bloom');
+            bloomCountEl.textContent = bloomed.size;
+          }
+          wait(450, () => {
+            animateAlong([[tip.x, tip.y], [tip.x - 40, tip.y + 30], FLY_HOME], 380, () => {
+              busy = false;
+              fly.classList.remove('flying');
+              if (bloomed.size === FLOWERS.length)
+                wait(500, () => overlay.classList.add('show'));
+            });
+          });
+        });
+      });
+    });
+  }
+  fly.addEventListener('click', launch);
+
+  function reset() {
+    bloomed.clear();
+    for (const fg of Object.values(flowerEls)) fg.classList.remove('bloom');
+    bloomCountEl.textContent = '0';
+    overlay.classList.remove('show');
+  }
+  document.getElementById('btn-reset').addEventListener('click', reset);
+  document.getElementById('btn-again').addEventListener('click', reset);
+
+  // ---- self-test: #autotest blooms all flowers via their binary codes ----
+  if (INSTANT) {
+    for (const idx of FLOWERS) {
+      bits[0] = (idx >> 3) & 1; bits[1] = (idx >> 2) & 1;
+      bits[2] = (idx >> 1) & 1; bits[3] = idx & 1;
+      renderLevers();
+      launch();
+    }
+    document.body.dataset.testResult =
+      bloomed.size === FLOWERS.length && overlay.classList.contains('show')
+        ? 'WIN blooms=' + bloomed.size
+        : 'FAIL blooms=' + bloomed.size;
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Slide Puzzle</title>
+<style>
+  :root {
+    --cream: #f0ead9;
+    --cream-line: #ddd5c0;
+    --gray-tile: #b3b9bd;
+    --gray-tile-inner: #c2c7ca;
+    --ink: #14110c;
+    --shadow: rgba(20, 17, 12, 0.25);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #e6dfcc;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    touch-action: none;
+    overflow: hidden;
+  }
+  .hud {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    user-select: none;
+  }
+  .hud .moves {
+    font-size: 18px;
+    font-weight: 600;
+    min-width: 110px;
+    text-align: center;
+  }
+  .hud button, .hud .btn-link {
+    font: inherit;
+    font-weight: 600;
+    padding: 8px 18px;
+    border: 3px solid var(--ink);
+    border-radius: 10px;
+    background: var(--cream);
+    color: var(--ink);
+    cursor: pointer;
+    box-shadow: 0 3px 0 var(--shadow);
+  }
+  .hud button:active { transform: translateY(2px); box-shadow: none; }
+  .hud .btn-link { text-decoration: none; display: inline-block; }
+  .hud button:disabled { opacity: 0.4; cursor: default; }
+
+  #board {
+    position: relative;
+    background: var(--cream);
+    border: 5px solid var(--ink);
+    border-radius: 6px;
+    box-shadow: 0 10px 30px var(--shadow);
+    /* size set by JS */
+  }
+  .gridline { position: absolute; background: var(--cream-line); pointer-events: none; }
+
+  .target {
+    position: absolute;
+    pointer-events: none;
+    opacity: 0.45;
+  }
+  .target.done { opacity: 0.9; filter: drop-shadow(0 0 6px rgba(120, 160, 90, 0.9)); }
+
+  .piece {
+    position: absolute;
+    cursor: grab;
+    will-change: transform;
+    transition: transform 0.22s cubic-bezier(0.3, 0.9, 0.4, 1);
+    touch-action: none;
+  }
+  .piece:active { cursor: grabbing; }
+  .piece svg { display: block; width: 100%; height: 100%; }
+  .piece.bump { animation: bump 0.15s ease-out; }
+  @keyframes bump {
+    0% { filter: brightness(1); }
+    50% { filter: brightness(1.15); }
+    100% { filter: brightness(1); }
+  }
+
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(20, 17, 12, 0.55);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+  }
+  #overlay.show { display: flex; }
+  #overlay .card {
+    background: var(--cream);
+    border: 5px solid var(--ink);
+    border-radius: 14px;
+    padding: 36px 48px;
+    text-align: center;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.4);
+    animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  @keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  #overlay h1 { font-size: 32px; margin-bottom: 8px; }
+  #overlay p { font-size: 18px; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <a href="index.html" class="btn-link">🏠 Menu</a>
+  <button id="btn-undo">↩ Undo</button>
+  <div class="moves">Nước đi: <span id="move-count">0</span></div>
+  <button id="btn-reset">⟲ Reset</button>
+</div>
+
+<div id="board"></div>
+
+<div id="overlay">
+  <div class="card">
+    <h1>🎉 Hoàn thành!</h1>
+    <p>Anh giải trong <b><span id="final-moves">0</span></b> nước (tối thiểu: 11)</p>
+    <button id="btn-again">Chơi lại</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const N = 5;
+
+  // ---- Level data (read from the original screenshot) ----
+  // pieces: id, shape, start [row, col]
+  const LEVEL = {
+    pieces: [
+      { id: 'diamond', shape: 'diamond', at: [0, 0] },
+      { id: 'spiky',   shape: 'spiky',   at: [1, 4] },
+      { id: 'ring',    shape: 'ring',    at: [2, 2] },
+      { id: 'star',    shape: 'star',    at: [4, 1] },
+      { id: 'square',  shape: 'square',  at: [4, 4] },
+    ],
+    // targets: which piece must reach which cell (every piece has one;
+    // the diagonal pieces start on their targets)
+    targets: [
+      { piece: 'diamond', at: [0, 0] },
+      { piece: 'star',    at: [1, 1] },
+      { piece: 'ring',    at: [2, 2] },
+      { piece: 'spiky',   at: [3, 3] },
+      { piece: 'square',  at: [4, 4] },
+    ],
+  };
+
+  // ---- SVG symbols (hand-drawn style of the original) ----
+  // Each returns inner SVG for a 100x100 viewBox.
+  const SYMBOLS = {
+    diamond: (stroke, fill) => `
+      <g transform="rotate(45 50 50)">
+        <rect x="22" y="22" width="56" height="56" fill="${fill}" stroke="${stroke}" stroke-width="7"/>
+        <rect x="32" y="32" width="36" height="36" fill="none" stroke="${stroke}" stroke-width="3.5"/>
+      </g>`,
+    spiky: (stroke, fill) => `
+      <path d="M50 12 L58 26 L42 26 Z M50 88 L58 74 L42 74 Z" fill="${stroke}"/>
+      <circle cx="50" cy="50" r="26" fill="${fill}" stroke="${stroke}" stroke-width="7"/>`,
+    ring: (stroke, fill) => `
+      <circle cx="50" cy="50" r="30" fill="${fill}" stroke="${stroke}" stroke-width="7"/>
+      <circle cx="50" cy="50" r="20" fill="none" stroke="${stroke}" stroke-width="3.5"/>`,
+    star: (stroke, fill) => `
+      <path d="M50 8 L60 40 L92 50 L60 60 L50 92 L40 60 L8 50 L40 40 Z" fill="${stroke}"/>
+      <circle cx="50" cy="50" r="22" fill="${fill}" stroke="${stroke}" stroke-width="5"/>`,
+    square: (stroke, fill) => `
+      <path d="M25 25 h50 v50 h-50 Z M25 25 l6 6 M75 25 l-6 6 M75 75 l-6 -6 M25 75 l6 -6"
+            fill="${fill}" stroke="${stroke}" stroke-width="7" stroke-linejoin="miter"/>
+      <rect x="36" y="36" width="28" height="28" fill="none" stroke="${stroke}" stroke-width="3.5"/>`,
+  };
+
+  function pieceSVG(shape) {
+    return `<svg viewBox="0 0 100 100">
+      <rect x="4" y="4" width="92" height="92" rx="3"
+            fill="var(--gray-tile)" stroke="var(--ink)" stroke-width="6"/>
+      <rect x="13" y="13" width="74" height="74" fill="var(--gray-tile-inner)"/>
+      <circle cx="18" cy="18" r="2.5" fill="#8b9094"/>
+      <circle cx="82" cy="18" r="2.5" fill="#8b9094"/>
+      <circle cx="18" cy="82" r="2.5" fill="#8b9094"/>
+      <circle cx="82" cy="82" r="2.5" fill="#8b9094"/>
+      ${SYMBOLS[shape]('var(--ink)', 'var(--cream)')}
+    </svg>`;
+  }
+
+  function targetSVG(shape) {
+    return `<svg viewBox="0 0 100 100">
+      <circle cx="12" cy="12" r="3" fill="#9a958a"/>
+      <circle cx="88" cy="12" r="3" fill="#9a958a"/>
+      <circle cx="12" cy="88" r="3" fill="#9a958a"/>
+      <circle cx="88" cy="88" r="3" fill="#9a958a"/>
+      ${SYMBOLS[shape]('#8f887a', 'none')}
+    </svg>`;
+  }
+
+  // ---- Board setup ----
+  const board = document.getElementById('board');
+  const moveCountEl = document.getElementById('move-count');
+  const overlay = document.getElementById('overlay');
+  const finalMovesEl = document.getElementById('final-moves');
+
+  let CELL = 100; // px, recomputed on resize
+  let state = {};       // pieceId -> [row, col]
+  let history = [];     // stack of previous states
+  let moves = 0;
+  let won = false;
+  const pieceEls = {};  // pieceId -> element
+  const targetEls = []; // { el, piece, at }
+
+  function computeCell() {
+    const margin = 32;
+    const avail = Math.min(window.innerWidth, window.innerHeight - 120) - margin;
+    CELL = Math.max(48, Math.floor(Math.min(560, avail) / N));
+  }
+
+  function buildBoard() {
+    computeCell();
+    board.innerHTML = '';
+    board.style.width = board.style.height = (CELL * N) + 'px';
+
+    for (let i = 1; i < N; i++) {
+      const h = document.createElement('div');
+      h.className = 'gridline';
+      h.style.cssText = `left:0; top:${i * CELL - 1}px; width:100%; height:2px;`;
+      const v = document.createElement('div');
+      v.className = 'gridline';
+      v.style.cssText = `top:0; left:${i * CELL - 1}px; height:100%; width:2px;`;
+      board.append(h, v);
+    }
+
+    targetEls.length = 0;
+    for (const t of LEVEL.targets) {
+      const el = document.createElement('div');
+      el.className = 'target';
+      const shape = LEVEL.pieces.find(p => p.id === t.piece).shape;
+      el.innerHTML = targetSVG(shape);
+      el.style.width = el.style.height = CELL + 'px';
+      el.style.left = (t.at[1] * CELL) + 'px';
+      el.style.top = (t.at[0] * CELL) + 'px';
+      board.appendChild(el);
+      targetEls.push({ el, piece: t.piece, at: t.at });
+    }
+
+    for (const p of LEVEL.pieces) {
+      const el = document.createElement('div');
+      el.className = 'piece';
+      el.innerHTML = pieceSVG(p.shape);
+      el.style.width = el.style.height = CELL + 'px';
+      board.appendChild(el);
+      pieceEls[p.id] = el;
+      attachDrag(el, p.id);
+    }
+    renderPositions(false);
+  }
+
+  function renderPositions(animate = true) {
+    for (const p of LEVEL.pieces) {
+      const el = pieceEls[p.id];
+      const [r, c] = state[p.id];
+      el.style.transition = animate ? '' : 'none';
+      el.style.transform = `translate(${c * CELL}px, ${r * CELL}px)`;
+      if (!animate) el.offsetHeight; // flush so next move animates
+      if (!animate) el.style.transition = '';
+    }
+    for (const t of targetEls) {
+      const [r, c] = state[t.piece];
+      t.el.classList.toggle('done', r === t.at[0] && c === t.at[1]);
+    }
+  }
+
+  // ---- Game logic ----
+  function occupied(exceptId) {
+    const s = new Set();
+    for (const p of LEVEL.pieces) {
+      if (p.id === exceptId) continue;
+      const [r, c] = state[p.id];
+      s.add(r * N + c);
+    }
+    return s;
+  }
+
+  function slideDest(id, dr, dc) {
+    const occ = occupied(id);
+    let [r, c] = state[id];
+    for (;;) {
+      const nr = r + dr, nc = c + dc;
+      if (nr < 0 || nr >= N || nc < 0 || nc >= N || occ.has(nr * N + nc)) break;
+      r = nr; c = nc;
+    }
+    return [r, c];
+  }
+
+  function tryMove(id, dr, dc) {
+    if (won) return;
+    const [r0, c0] = state[id];
+    const [r, c] = slideDest(id, dr, dc);
+    if (r === r0 && c === c0) {
+      const el = pieceEls[id];
+      el.classList.remove('bump');
+      el.offsetHeight;
+      el.classList.add('bump');
+      return;
+    }
+    history.push({ ...state });
+    state = { ...state, [id]: [r, c] };
+    moves++;
+    moveCountEl.textContent = moves;
+    // animation duration scales with distance
+    const dist = Math.abs(r - r0) + Math.abs(c - c0);
+    pieceEls[id].style.transitionDuration = (0.1 + dist * 0.055) + 's';
+    renderPositions(true);
+    checkWin();
+  }
+
+  function checkWin() {
+    const ok = LEVEL.targets.every(t => {
+      const [r, c] = state[t.piece];
+      return r === t.at[0] && c === t.at[1];
+    });
+    if (ok) {
+      won = true;
+      finalMovesEl.textContent = moves;
+      setTimeout(() => overlay.classList.add('show'), 350);
+    }
+  }
+
+  function reset() {
+    state = Object.fromEntries(LEVEL.pieces.map(p => [p.id, p.at.slice()]));
+    history = [];
+    moves = 0;
+    won = false;
+    moveCountEl.textContent = '0';
+    overlay.classList.remove('show');
+    renderPositions(true);
+  }
+
+  function undo() {
+    if (!history.length || won) return;
+    state = history.pop();
+    moves++;
+    moveCountEl.textContent = moves;
+    renderPositions(true);
+  }
+
+  // ---- Drag / swipe input ----
+  function attachDrag(el, id) {
+    let startX = 0, startY = 0, tracking = false;
+    const THRESHOLD = 18; // px before a direction is committed
+
+    el.addEventListener('pointerdown', (e) => {
+      if (won) return;
+      tracking = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      el.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!tracking) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < THRESHOLD) return;
+      tracking = false; // one move per gesture
+      if (Math.abs(dx) > Math.abs(dy)) {
+        tryMove(id, 0, dx > 0 ? 1 : -1);
+      } else {
+        tryMove(id, dy > 0 ? 1 : -1, 0);
+      }
+    });
+    const stop = () => { tracking = false; };
+    el.addEventListener('pointerup', stop);
+    el.addEventListener('pointercancel', stop);
+  }
+
+  // ---- Wire up ----
+  document.getElementById('btn-reset').addEventListener('click', reset);
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-again').addEventListener('click', reset);
+  window.addEventListener('resize', () => { buildBoard(); renderPositions(false); });
+
+  state = Object.fromEntries(LEVEL.pieces.map(p => [p.id, p.at.slice()]));
+  buildBoard();
+
+  // self-test: open with #autotest to replay the known 7-move solution
+  if (location.hash === '#autotest') {
+    const solution = [
+      ['spiky', -1, 0], ['spiky', 0, -1], ['diamond', 1, 0], ['star', -1, 0],
+      ['diamond', 0, 1], ['square', -1, 0], ['spiky', 0, 1], ['spiky', 1, 0],
+      ['diamond', 0, -1], ['diamond', -1, 0], ['square', 1, 0],
+    ];
+    for (const [id, dr, dc] of solution) tryMove(id, dr, dc);
+    document.body.dataset.testResult = won
+      ? 'WIN moves=' + moves
+      : 'FAIL state=' + JSON.stringify(state);
+  }
+})();
+</script>
+</body>
+</html>
