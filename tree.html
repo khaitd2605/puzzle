@@ -246,13 +246,15 @@
     const g = el('g', { transform: `translate(${t.x} ${t.y})` }, treeG);
     if (FLOWERS.includes(i)) {
       const fg = el('g', { transform: `rotate(${t.angle * 57.3})` }, g);
-      // petals (hidden until bloom)
-      for (let p = 0; p < 5; p++) {
+      // petals (hidden until bloom) — rotation lives on a wrapper group so
+      // the scale animation on the petal itself doesn't override it
+      for (let p = 0; p < 6; p++) {
+        const pg = el('g', { transform: `rotate(${p * 60})` }, fg);
         el('ellipse', {
-          class: 'petal', cx: 0, cy: -13, rx: 7, ry: 13,
+          class: 'petal', cx: 0, cy: -14, rx: 7.5, ry: 14,
           fill: 'var(--pink)', stroke: 'var(--ink)', 'stroke-width': 3,
-          transform: `rotate(${p * 72})`, style: 'transform:scale(0)',
-        }, fg);
+          style: 'transform:scale(0)',
+        }, pg);
       }
       el('circle', {
         class: 'bloom-center', cx: 0, cy: 0, r: 6.5,
