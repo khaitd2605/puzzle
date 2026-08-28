@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Bó Hoa Bí Ẩn</title>
+<style>
+  :root {
+    --ink: #1a140e;
+    --cream: #f0ead9;
+    --wall: #e8dfd0;
+    --wood: #b78a5c;
+    --wood-dark: #96693f;
+    --paper: #d9c5a3;
+    --paper-dark: #c4ab84;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #d9cebd;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 150px 40px rgba(60, 45, 25, 0.45);
+  }
+  #stage { width: 100%; max-width: 900px; padding: 8px; }
+  svg { display: block; width: 100%; height: auto; }
+
+  .hud {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    z-index: 5;
+  }
+  .hud a {
+    font: inherit; font-size: 14px; font-weight: 600;
+    padding: 7px 14px;
+    border: 3px solid var(--ink);
+    border-radius: 10px;
+    background: var(--cream);
+    color: var(--ink);
+    text-decoration: none;
+    box-shadow: 0 3px 0 rgba(0,0,0,0.3);
+  }
+
+  #hint {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    font-weight: 700;
+    font-size: clamp(14px, 2.6vw, 19px);
+    background: var(--cream);
+    border: 3px solid var(--ink);
+    border-radius: 12px;
+    padding: 9px 20px;
+    box-shadow: 0 3px 0 rgba(0,0,0,0.3);
+    transition: opacity 0.4s;
+    white-space: nowrap;
+  }
+
+  .flower { transition: transform 1.1s cubic-bezier(0.35, 1.2, 0.4, 1), opacity 0.7s; will-change: transform; }
+  .flower.pickable { cursor: pointer; }
+  .flower .head-in { transform-box: fill-box; transform-origin: center; transition: transform 0.3s; }
+  .flower.pickable:hover .head-in { transform: scale(1.12); }
+  .flower.dim { opacity: 0; pointer-events: none; }
+  .flower.chosen .head-in { animation: joy 1.6s ease-in-out infinite; }
+  @keyframes joy {
+    0%, 100% { transform: scale(1) rotate(-3deg); }
+    50% { transform: scale(1.1) rotate(3deg); }
+  }
+
+  /* two paper panels opening like a pair of doors (hinges on the outer edges) */
+  .flap { transition: transform 0.85s cubic-bezier(0.6, 0, 0.3, 1), filter 0.85s; transform-box: fill-box; }
+  .flap.left { transform-origin: 0% 50%; }
+  .flap.right { transform-origin: 100% 50%; }
+  .flap.left.open { transform: scaleX(0.07) skewY(-4deg); filter: brightness(0.75); }
+  .flap.right.open { transform: scaleX(0.07) skewY(4deg); filter: brightness(0.75); }
+  #paper-base, #ribbon { transition: opacity 0.7s, transform 0.7s; transform-box: fill-box; }
+  .fade-away { opacity: 0 !important; transform: translateY(40px); pointer-events: none; }
+
+  #tap-zone { cursor: pointer; }
+
+  #card {
+    position: fixed;
+    left: 50%;
+    bottom: 6%;
+    transform: translateX(-50%) scale(0.7);
+    z-index: 6;
+    background: var(--cream);
+    border: 4px solid var(--ink);
+    border-radius: 16px;
+    padding: 20px 34px;
+    text-align: center;
+    max-width: min(560px, 92vw);
+    box-shadow: 0 10px 30px rgba(40, 25, 10, 0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.5s, transform 0.5s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  #card.show { opacity: 1; transform: translateX(-50%) scale(1); pointer-events: auto; }
+  #card h1 { font-size: clamp(18px, 3.6vw, 26px); margin-bottom: 6px; }
+  #card p { font-size: clamp(14px, 2.8vw, 18px); margin-bottom: 14px; line-height: 1.5; }
+  #card button {
+    font: inherit; font-weight: 600;
+    padding: 7px 18px;
+    border: 3px solid var(--ink); border-radius: 10px;
+    background: white; cursor: pointer;
+  }
+
+  .petal-rain { position: fixed; inset: 0; pointer-events: none; z-index: 4; overflow: hidden; }
+  .petal-rain span {
+    position: absolute;
+    top: -30px;
+    font-size: 22px;
+    animation: rain linear forwards;
+  }
+  @keyframes rain {
+    to { transform: translateY(110vh) rotate(540deg); }
+  }
+</style>
+</head>
+<body>
+
+<div class="hud"><a href="index.html">🏠 Menu</a></div>
+<div id="hint">🎁 Trên bàn có một gói quà — bấm để mở ra</div>
+
+<div id="stage">
+  <svg id="scene" viewBox="0 0 900 640"></svg>
+</div>
+
+<div id="card">
+  <h1 id="card-title">💐</h1>
+  <p id="card-text"></p>
+  <button id="btn-replay">Mở lại bó hoa 🎀</button>
+</div>
+<div class="petal-rain" id="rain"></div>
+
+<script>
+(() => {
+  'use strict';
+  const SVG = 'http://www.w3.org/2000/svg';
+  const scene = document.getElementById('scene');
+  const hint = document.getElementById('hint');
+  const card = document.getElementById('card');
+
+  function el(name, attrs, parent = scene) {
+    const e = document.createElementNS(SVG, name);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  }
+  const rnd = s => { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x); };
+
+  // ---------------- scenery ----------------
+  el('rect', { x: 0, y: 0, width: 900, height: 640, fill: 'var(--wall)' });
+  // soft window light
+  el('ellipse', { cx: 450, cy: 180, rx: 380, ry: 190, fill: 'rgba(255,250,235,0.55)' });
+  // table
+  el('rect', { x: 0, y: 330, width: 900, height: 310, fill: 'var(--wood)' });
+  el('line', { x1: 0, y1: 330, x2: 900, y2: 330, stroke: 'var(--ink)', 'stroke-width': 6 });
+  for (let i = 0; i < 7; i++) {
+    el('path', {
+      d: `M 0 ${365 + i * 34 + rnd(i) * 10} q 220 ${rnd(i + 2) * 14 - 7} 450 0 t 450 ${rnd(i + 5) * 10 - 5}`,
+      fill: 'none', stroke: 'var(--wood-dark)', 'stroke-width': 2.5, opacity: 0.5,
+    });
+  }
+
+  // ---------------- flowers ----------------
+  const FLOWERS = [
+    { id: 'rose',      name: 'Hoa hồng đỏ',      c: { a: '#c8384a', b: '#7e1f2d' } },
+    { id: 'tulip',     name: 'Tulip tím',         c: { a: '#a279c8', b: '#7a54a0' } },
+    { id: 'daisy',     name: 'Cúc trắng',         c: { a: '#fdfaf2', b: '#f0c33c' } },
+    { id: 'carnation', name: 'Cẩm chướng đỏ',     c: { a: '#d95560', b: '#a83240' } },
+    { id: 'sunflower', name: 'Hướng dương',       c: { a: '#f2b02e', b: '#6d4423' } },
+    { id: 'bluebell',  name: 'Lưu ly xanh',       c: { a: '#7da8d8', b: '#f0c33c' } },
+    { id: 'rose',      name: 'Hồng vàng',         c: { a: '#e8b64c', b: '#a87b1e' } },
+    { id: 'lavender',  name: 'Oải hương tím',     c: { a: '#8f7bc0', b: '#7a63b5' } },
+    { id: 'tulip',     name: 'Tulip vàng',        c: { a: '#f0c33c', b: '#c79a1d' } },
+    { id: 'daisy',     name: 'Cúc hồng',          c: { a: '#f3b8cc', b: '#e08c2e' } },
+    { id: 'rose',      name: 'Hồng bạch',         c: { a: '#f2ece0', b: '#b3a68e' } },
+    { id: 'carnation', name: 'Cẩm chướng hồng',   c: { a: '#ef9db5', b: '#d96e92' } },
+    { id: 'tulip',     name: 'Tulip đỏ',          c: { a: '#d95555', b: '#a83232' } },
+    { id: 'bluebell',  name: 'Lưu ly trắng',      c: { a: '#eef0f4', b: '#f0c33c' } },
+  ];
+
+  function drawHead(type, h, C) {
+    // each head is drawn around (0,0)
+    switch (type) {
+      case 'rose': {
+        el('circle', { cx: 0, cy: 0, r: 26, fill: C.a, stroke: 'var(--ink)', 'stroke-width': 4 }, h);
+        el('path', { d: 'M 0 -18 C 18 -14 20 8 4 16 C -16 22 -24 2 -10 -8 C -2 -13 10 -10 8 0 C 7 8 -4 9 -5 2', fill: 'none', stroke: C.b, 'stroke-width': 4, 'stroke-linecap': 'round' }, h);
+        break;
+      }
+      case 'sunflower': {
+        for (let i = 0; i < 12; i++)
+          el('ellipse', { cx: 0, cy: -24, rx: 8, ry: 16, fill: C.a, stroke: 'var(--ink)', 'stroke-width': 3, transform: `rotate(${i * 30})` }, h);
+        el('circle', { cx: 0, cy: 0, r: 15, fill: C.b, stroke: 'var(--ink)', 'stroke-width': 3.5 }, h);
+        el('circle', { cx: 0, cy: 0, r: 8, fill: 'none', stroke: 'rgba(0,0,0,0.35)', 'stroke-width': 2 }, h);
+        break;
+      }
+      case 'tulip': {
+        el('path', { d: 'M -20 -6 C -22 -28 -8 -34 0 -20 C 8 -34 22 -28 20 -6 C 18 12 8 20 0 20 C -8 20 -18 12 -20 -6 Z', fill: C.a, stroke: 'var(--ink)', 'stroke-width': 4 }, h);
+        el('path', { d: 'M -8 -24 C -6 -10 -6 6 -4 16 M 8 -24 C 6 -10 6 6 4 16', fill: 'none', stroke: C.b, 'stroke-width': 3 }, h);
+        break;
+      }
+      case 'daisy': {
+        for (let i = 0; i < 10; i++)
+          el('ellipse', { cx: 0, cy: -20, rx: 7.5, ry: 15, fill: C.a, stroke: 'var(--ink)', 'stroke-width': 3, transform: `rotate(${i * 36})` }, h);
+        el('circle', { cx: 0, cy: 0, r: 11, fill: C.b, stroke: 'var(--ink)', 'stroke-width': 3.5 }, h);
+        break;
+      }
+      case 'lavender': {
+        for (let i = 0; i < 8; i++) {
+          const y = -i * 9;
+          el('ellipse', { cx: (i % 2 ? 7 : -7), cy: y, rx: 8, ry: 6, fill: C.a, stroke: 'var(--ink)', 'stroke-width': 3 }, h);
+        }
+        el('ellipse', { cx: 0, cy: -70, rx: 7, ry: 8, fill: C.b, stroke: 'var(--ink)', 'stroke-width': 3 }, h);
+        break;
+      }
+      case 'carnation': {
+        el('path', {
+          d: 'M -24 0 L -18 -14 L -10 -6 L -6 -20 L 0 -10 L 6 -20 L 10 -6 L 18 -14 L 24 0 L 16 4 L 20 14 L 8 10 L 4 20 L -4 20 L -8 10 L -20 14 L -16 4 Z',
+          fill: C.a, stroke: 'var(--ink)', 'stroke-width': 4, 'stroke-linejoin': 'round',
+        }, h);
+        el('circle', { cx: 0, cy: 0, r: 7, fill: C.b, stroke: 'var(--ink)', 'stroke-width': 3 }, h);
+        break;
+      }
+      case 'bluebell': {
+        for (const [dx, dy] of [[-14, -4], [14, -4], [0, -16], [-8, 10], [8, 10]]) {
+          const g2 = el('g', { transform: `translate(${dx} ${dy})` }, h);
+          for (let i = 0; i < 5; i++)
+            el('circle', { cx: 0, cy: -7, r: 5, fill: C.a, stroke: 'var(--ink)', 'stroke-width': 2.5, transform: `rotate(${i * 72})` }, g2);
+          el('circle', { cx: 0, cy: 0, r: 3, fill: C.b, stroke: 'var(--ink)', 'stroke-width': 2 }, g2);
+        }
+        break;
+      }
+    }
+  }
+
+  function drawFlower(f, seed) {
+    // origin at stem bottom; head at (0,-150)
+    const g = el('g', { class: 'flower' });
+    const bend = (rnd(seed) - 0.5) * 30;
+    el('path', {
+      d: `M 0 0 C ${bend} -50 ${-bend} -100 0 -145`,
+      fill: 'none', stroke: '#4f7a3a', 'stroke-width': 6, 'stroke-linecap': 'round',
+    }, g);
+    // leaves
+    el('path', {
+      d: `M 0 -55 q -26 -6 -34 -28 q 26 -2 34 18 Z`,
+      fill: '#699850', stroke: 'var(--ink)', 'stroke-width': 3, 'stroke-linejoin': 'round',
+    }, g);
+    el('path', {
+      d: `M 0 -85 q 26 -6 34 -28 q -26 -2 -34 18 Z`,
+      fill: '#699850', stroke: 'var(--ink)', 'stroke-width': 3, 'stroke-linejoin': 'round',
+    }, g);
+    const head = el('g', { class: 'head', transform: 'translate(0 -150)' }, g);
+    const headInner = el('g', { class: 'head-in' }, head);
+    drawHead(f.id, headInner, f.c);
+    return g;
+  }
+
+  // bouquet cluster poses (on the table, stems gathered at one point)
+  const GATHER = [450, 445];
+  const clusterPose = i => {
+    const a = (i - 6.5) * 4.2 + (rnd(i * 7) - 0.5) * 3; // fan angles, tucked inside the wrap
+    return `translate(${GATHER[0]}px, ${GATHER[1]}px) rotate(${a}deg) scale(0.85)`;
+  };
+  const spreadPose = i => {
+    const row = (i / 7) | 0, col = i % 7;
+    const x = 122 + col * 109 + (row ? 54 : 0);
+    return row
+      ? `translate(${x}px, 508px) rotate(0deg) scale(1)`
+      : `translate(${x}px, 388px) rotate(0deg) scale(0.9)`;
+  };
+  // final bouquet: everyone gathers around the chosen one.
+  // Two depth layers — tall flowers behind, a shorter row in front —
+  // with positions/rotations lightly randomized on every play.
+  const backPose = (k, n) => {
+    const a = (k - (n - 1) / 2) * 9 + (Math.random() - 0.5) * 5;
+    const x = 450 + (Math.random() - 0.5) * 26;
+    const y = 412 + Math.random() * 16;
+    const sc = 1.0 + Math.random() * 0.1;
+    return `translate(${x}px, ${y}px) rotate(${a}deg) scale(${sc})`;
+  };
+  const frontPose = (k, n) => {
+    const a = (k - (n - 1) / 2) * 11 + (Math.random() - 0.5) * 6;
+    const x = 450 + (Math.random() - 0.5) * 34;
+    const y = 452 + Math.random() * 14;
+    const sc = 0.74 + Math.random() * 0.1;
+    return `translate(${x}px, ${y}px) rotate(${a}deg) scale(${sc})`;
+  };
+
+  const flowerEls = FLOWERS.map((f, i) => {
+    const g = drawFlower(f, i * 9 + 4);
+    g.style.transform = clusterPose(i);
+    return g;
+  });
+
+  // ---------------- wrapping paper ----------------
+  const paperBase = el('g', { id: 'paper-base' });
+  el('path', {
+    d: 'M 360 320 L 540 320 L 505 495 Q 450 512 395 495 Z',
+    fill: 'var(--paper)', stroke: 'var(--ink)', 'stroke-width': 5, 'stroke-linejoin': 'round',
+  }, paperBase);
+  el('path', { d: 'M 385 340 L 415 485 M 515 340 L 487 485', fill: 'none', stroke: 'var(--paper-dark)', 'stroke-width': 3 }, paperBase);
+
+  const flapL = el('g', { class: 'flap left' });
+  el('path', {
+    d: 'M 358 155 Q 350 300 366 462 L 451 474 L 451 148 Q 400 138 358 155 Z',
+    fill: 'var(--paper)', stroke: 'var(--ink)', 'stroke-width': 5, 'stroke-linejoin': 'round',
+  }, flapL);
+  el('path', { d: 'M 388 170 Q 380 300 392 450 M 420 160 Q 414 300 424 462', fill: 'none', stroke: 'var(--paper-dark)', 'stroke-width': 3 }, flapL);
+
+  const flapR = el('g', { class: 'flap right' });
+  el('path', {
+    d: 'M 542 155 Q 550 300 534 462 L 449 474 L 449 148 Q 500 138 542 155 Z',
+    fill: 'var(--paper)', stroke: 'var(--ink)', 'stroke-width': 5, 'stroke-linejoin': 'round',
+  }, flapR);
+  el('path', { d: 'M 512 170 Q 520 300 508 450 M 480 160 Q 486 300 476 462', fill: 'none', stroke: 'var(--paper-dark)', 'stroke-width': 3 }, flapR);
+
+  const ribbon = el('g', { id: 'ribbon' });
+  el('rect', { x: 396, y: 392, width: 108, height: 22, rx: 6, fill: '#c8384a', stroke: 'var(--ink)', 'stroke-width': 4 }, ribbon);
+  el('path', { d: 'M 450 403 l -22 -18 l 0 36 Z M 450 403 l 22 -18 l 0 36 Z', fill: '#e05a6d', stroke: 'var(--ink)', 'stroke-width': 3.5, 'stroke-linejoin': 'round' }, ribbon);
+  el('circle', { cx: 450, cy: 403, r: 7, fill: '#8e2333', stroke: 'var(--ink)', 'stroke-width': 3 }, ribbon);
+
+  // invisible tap zone over the bouquet
+  const tap = el('rect', { id: 'tap-zone', x: 320, y: 120, width: 260, height: 400, fill: 'transparent' });
+
+  // ---------------- flow ----------------
+  let phase = 0; // 0 wrapped, 1 one side open, 2 spread, 3 chosen
+  tap.addEventListener('click', () => {
+    if (phase === 0) {
+      phase = 1;
+      ribbon.classList.add('fade-away');   // the bow unties first
+      flapL.classList.add('open');
+      hint.textContent = '👀 Hé rồi… bấm mở nốt cánh bên kia!';
+    } else if (phase === 1) {
+      phase = 2;
+      flapR.classList.add('open');
+      hint.textContent = '🌷 Ồ, một bó hoa!';
+      setTimeout(spread, 900);
+    }
+  });
+
+  function spread() {
+    paperBase.classList.add('fade-away');
+    ribbon.classList.add('fade-away');
+    flapL.classList.add('fade-away');
+    flapR.classList.add('fade-away');
+    tap.style.display = 'none';
+    flowerEls.forEach((g, i) => {
+      g.style.transitionDelay = (i * 0.07) + 's';
+      g.style.transform = spreadPose(i);
+    });
+    setTimeout(() => {
+      hint.textContent = '✨ Chọn bông hoa nổi bật nhất!';
+      flowerEls.forEach((g, i) => {
+        g.classList.add('pickable');
+        g.addEventListener('click', () => choose(i), { once: false });
+      });
+    }, 1300);
+  }
+
+  function choose(i) {
+    if (phase === 3) return;
+    phase = 3;
+    hint.style.opacity = '0';
+    // the chosen one flies to the middle first...
+    flowerEls.forEach(g => g.classList.remove('pickable'));
+    const chosen = flowerEls[i];
+    chosen.classList.add('chosen');
+    scene.appendChild(chosen);          // bring to front first...
+    void chosen.getBoundingClientRect(); // ...so the flight transition survives
+    chosen.style.transitionDelay = '0s';
+    chosen.style.transform = 'translate(450px, 430px) rotate(0deg) scale(1.25)';
+    // ...then the rest swoop in around it, forming one big bouquet
+    setTimeout(() => {
+      const others = flowerEls.filter((g, j) => j !== i);
+      // gently randomized stacking order for a natural-looking bunch
+      const order = others.slice().sort(() => Math.random() - 0.5);
+      const back = order.slice(0, 8);           // tall layer behind the chosen one
+      const front = order.slice(8);             // shorter layer in front
+      for (const g of back) scene.insertBefore(g, chosen);
+      for (const g of front) scene.appendChild(g);
+      void scene.getBoundingClientRect();
+      let d = 0;
+      back.forEach((g, k) => {
+        g.style.transitionDelay = (d++ * 0.05) + 's';
+        g.style.transform = backPose(k, back.length);
+      });
+      front.forEach((g, k) => {
+        g.style.transitionDelay = (d++ * 0.05) + 's';
+        g.style.transform = frontPose(k, front.length);
+      });
+    }, 700);
+    setTimeout(() => {
+      document.getElementById('card-title').textContent = '😄 Sao phải chọn — tặng hết luôn!';
+      document.getElementById('card-text').innerHTML =
+        `Cả bó ${FLOWERS.length} bông này là của mấy sếp đó 💐<br><b>Chúc mấy sếp nghỉ lễ thật vui vẻ, an lành bên gia đình!</b> 🎉`;
+      card.classList.add('show');
+      petalRain();
+    }, 2100);
+  }
+
+  function petalRain() {
+    const rain = document.getElementById('rain');
+    const glyphs = ['🌸', '🌼', '🌺', '💮', '🌷'];
+    for (let i = 0; i < 26; i++) {
+      const s = document.createElement('span');
+      s.textContent = glyphs[i % glyphs.length];
+      s.style.left = (Math.random() * 100) + 'vw';
+      s.style.animationDuration = (3.2 + Math.random() * 3) + 's';
+      s.style.animationDelay = (Math.random() * 1.6) + 's';
+      s.style.fontSize = (16 + Math.random() * 16) + 'px';
+      rain.appendChild(s);
+    }
+    setTimeout(() => rain.innerHTML = '', 8000);
+  }
+
+  document.getElementById('btn-replay').addEventListener('click', () => location.reload());
+
+  // self-test hook
+  if (location.hash === '#autotest') {
+    tap.dispatchEvent(new Event('click'));
+    tap.dispatchEvent(new Event('click'));
+    setTimeout(() => {
+      choose(2);
+      setTimeout(() => {
+        document.body.dataset.testResult =
+          card.classList.contains('show') ? 'WIN bouquet' : 'FAIL';
+      }, 2600);
+    }, 2600);
+  }
+})();
+</script>
+</body>
+</html>
