@@ -66,6 +66,9 @@
     border-radius: 10px;
     padding: 7px 14px;
   }
+  .levels { display: flex; gap: 6px; }
+  .levels button { padding: 7px 12px; opacity: 0.55; }
+  .levels button.active { opacity: 1; background: #d9e8b8; }
 
   .lever { cursor: pointer; }
   .lever .plank {
@@ -126,6 +129,7 @@
   <a href="index.html">🏠 Menu</a>
   <button id="btn-reset">⟲ Reset</button>
   <div class="count">🌸 <span id="bloom-count">0</span>/<span id="bloom-total">7</span></div>
+  <div class="levels" id="level-btns"></div>
 </div>
 
 <div id="stage">
@@ -135,8 +139,9 @@
 <div id="overlay">
   <div class="card">
     <h1>🌸 Cây đã nở hết hoa!</h1>
-    <p>Anh đã tìm ra cả <b>7</b> bí mật của cái cây 👏</p>
+    <p>Anh đã tìm ra cả <b><span id="win-count">7</span></b> bí mật của cái cây 👏</p>
     <button id="btn-again">Chơi lại</button>
+    <button id="btn-next">Level tiếp →</button>
   </div>
 </div>
 
@@ -147,7 +152,14 @@
   const INSTANT = location.hash === '#autotest';
 
   // ---- Level data ----
-  const FLOWERS = [1, 4, 6, 9, 11, 13, 14]; // tip indices (0-15) that carry a flower bud
+  // Each level = which branch tips (0-15) carry a flower bud.
+  const LEVELS = [
+    { name: '1', flowers: [3, 6, 9, 12] },
+    { name: '2', flowers: [1, 4, 6, 9, 11, 13, 14] },
+    { name: '3', flowers: [0, 2, 3, 5, 7, 8, 10, 12, 13, 15] },
+  ];
+  let levelIdx = 0;
+  let FLOWERS = LEVELS[0].flowers;
   const GROUND_Y = 662;
   const TRUNK_X = 440, TRUNK_TOP = 508;
   const HOLE = [TRUNK_X, 600];
@@ -231,8 +243,9 @@
   el('ellipse', { cx: HOLE[0], cy: HOLE[1], rx: 11, ry: 22, fill: '#0a0705', stroke: 'var(--ink)', 'stroke-width': 4 }, treeG);
 
   // ---- Tips: flowers & leaves ----
-  const flowerEls = {}; // tip idx -> group
+  let flowerEls = {}; // tip idx -> group
   const bloomed = new Set();
+  let tipGroups = [];
   const leafShape = (g, angle) => {
     for (const side of [-0.5, 0.5]) {
       el('ellipse', {
@@ -241,36 +254,43 @@
       }, g);
     }
   };
-  for (let i = 0; i < 16; i++) {
-    const t = tips[i];
-    const g = el('g', { transform: `translate(${t.x} ${t.y})` }, treeG);
-    if (FLOWERS.includes(i)) {
-      const fg = el('g', { transform: `rotate(${t.angle * 57.3})` }, g);
-      // petals (hidden until bloom) — rotation lives on a wrapper group so
-      // the scale animation on the petal itself doesn't override it
-      for (let p = 0; p < 6; p++) {
-        const pg = el('g', { transform: `rotate(${p * 60})` }, fg);
-        el('ellipse', {
-          class: 'petal', cx: 0, cy: -14, rx: 7.5, ry: 14,
-          fill: 'var(--pink)', stroke: 'var(--ink)', 'stroke-width': 3,
+  function buildTips() {
+    for (const g of tipGroups) g.remove();
+    tipGroups = [];
+    flowerEls = {};
+    for (let i = 0; i < 16; i++) {
+      const t = tips[i];
+      const g = el('g', { transform: `translate(${t.x} ${t.y})` }, treeG);
+      tipGroups.push(g);
+      if (FLOWERS.includes(i)) {
+        const fg = el('g', { transform: `rotate(${t.angle * 57.3})` }, g);
+        // petals (hidden until bloom) — rotation lives on a wrapper group so
+        // the scale animation on the petal itself doesn't override it
+        for (let p = 0; p < 6; p++) {
+          const pg = el('g', { transform: `rotate(${p * 60})` }, fg);
+          el('ellipse', {
+            class: 'petal', cx: 0, cy: -14, rx: 7.5, ry: 14,
+            fill: 'var(--pink)', stroke: 'var(--ink)', 'stroke-width': 3,
+            style: 'transform:scale(0)',
+          }, pg);
+        }
+        el('circle', {
+          class: 'bloom-center', cx: 0, cy: 0, r: 6.5,
+          fill: '#f7e8a0', stroke: 'var(--ink)', 'stroke-width': 3,
           style: 'transform:scale(0)',
-        }, pg);
+        }, fg);
+        // bud
+        el('ellipse', {
+          class: 'bud', cx: 0, cy: -12, rx: 7.5, ry: 14,
+          fill: 'var(--pink)', stroke: 'var(--ink)', 'stroke-width': 4,
+        }, fg);
+        flowerEls[i] = fg;
+      } else {
+        leafShape(g, t.angle);
       }
-      el('circle', {
-        class: 'bloom-center', cx: 0, cy: 0, r: 6.5,
-        fill: '#f7e8a0', stroke: 'var(--ink)', 'stroke-width': 3,
-        style: 'transform:scale(0)',
-      }, fg);
-      // bud
-      el('ellipse', {
-        class: 'bud', cx: 0, cy: -12, rx: 7.5, ry: 14,
-        fill: 'var(--pink)', stroke: 'var(--ink)', 'stroke-width': 4,
-      }, fg);
-      flowerEls[i] = fg;
-    } else {
-      leafShape(g, t.angle);
     }
   }
+  buildTips();
 
   // ---- Levers (4 bits, MSB leftmost; left = 0, right = 1) ----
   const bits = [0, 0, 0, 0];
@@ -340,8 +360,11 @@
   const wait = (ms, fn) => INSTANT ? fn() : setTimeout(fn, ms);
 
   const bloomCountEl = document.getElementById('bloom-count');
-  document.getElementById('bloom-total').textContent = FLOWERS.length;
+  const bloomTotalEl = document.getElementById('bloom-total');
+  const winCountEl = document.getElementById('win-count');
   const overlay = document.getElementById('overlay');
+  const btnNext = document.getElementById('btn-next');
+  const levelBtnsEl = document.getElementById('level-btns');
 
   function launch() {
     if (busy) return;
@@ -394,21 +417,43 @@
     bloomCountEl.textContent = '0';
     overlay.classList.remove('show');
   }
+  function loadLevel(i) {
+    levelIdx = i;
+    FLOWERS = LEVELS[i].flowers;
+    buildTips();
+    reset();
+    bloomTotalEl.textContent = FLOWERS.length;
+    winCountEl.textContent = FLOWERS.length;
+    btnNext.style.display = i + 1 < LEVELS.length ? '' : 'none';
+    [...levelBtnsEl.children].forEach((b, j) => b.classList.toggle('active', j === i));
+  }
   document.getElementById('btn-reset').addEventListener('click', reset);
   document.getElementById('btn-again').addEventListener('click', reset);
+  btnNext.addEventListener('click', () => loadLevel(Math.min(levelIdx + 1, LEVELS.length - 1)));
+  LEVELS.forEach((L, i) => {
+    const b = document.createElement('button');
+    b.textContent = L.name;
+    b.addEventListener('click', () => loadLevel(i));
+    levelBtnsEl.appendChild(b);
+  });
+  loadLevel(0);
 
-  // ---- self-test: #autotest blooms all flowers via their binary codes ----
+  // ---- self-test: #autotest blooms every level's flowers via their codes ----
   if (INSTANT) {
-    for (const idx of FLOWERS) {
-      bits[0] = (idx >> 3) & 1; bits[1] = (idx >> 2) & 1;
-      bits[2] = (idx >> 1) & 1; bits[3] = idx & 1;
-      renderLevers();
-      launch();
+    let wins = 0;
+    for (let i = 0; i < LEVELS.length; i++) {
+      loadLevel(i);
+      for (const idx of FLOWERS) {
+        bits[0] = (idx >> 3) & 1; bits[1] = (idx >> 2) & 1;
+        bits[2] = (idx >> 1) & 1; bits[3] = idx & 1;
+        renderLevers();
+        launch();
+      }
+      if (bloomed.size === FLOWERS.length && overlay.classList.contains('show')) wins++;
     }
-    document.body.dataset.testResult =
-      bloomed.size === FLOWERS.length && overlay.classList.contains('show')
-        ? 'WIN blooms=' + bloomed.size
-        : 'FAIL blooms=' + bloomed.size;
+    document.body.dataset.testResult = wins === LEVELS.length
+      ? 'WIN levels=' + wins
+      : 'FAIL wins=' + wins;
   }
 })();
 </script>
