@@ -33,7 +33,7 @@
     pointer-events: none;
     box-shadow: inset 0 0 150px 40px rgba(60, 45, 25, 0.45);
   }
-  #stage { width: 100%; max-width: 900px; padding: 8px; }
+  #stage { width: 100%; max-width: 900px; padding: 8px; transition: transform 0.7s cubic-bezier(0.3, 0.9, 0.4, 1); }
   svg { display: block; width: 100%; height: auto; }
 
   .hud {
@@ -73,7 +73,13 @@
   /* phones: drop the hint below the menu button so they never overlap */
   @media (max-width: 640px) {
     #hint { top: 60px; padding: 7px 14px; }
-    #card { padding: 16px 18px; bottom: 4%; }
+    #card { padding: 14px 16px; bottom: 2%; }
+    #card h1 { font-size: 17px; }
+    #card p { font-size: 14px; margin-bottom: 10px; }
+    body.finale #stage { transform: translateY(-16vh); }
+  }
+  @media (max-height: 560px) {
+    body.finale #stage { transform: translateY(-12vh); }
   }
 
   .flower { transition: transform 1.1s cubic-bezier(0.35, 1.2, 0.4, 1), opacity 0.7s; will-change: transform; }
@@ -419,6 +425,7 @@
       document.getElementById('card-text').innerHTML =
         `Cả bó ${FLOWERS.length} bông này là của mấy sếp đó 💐<br><b>Chúc mấy sếp nghỉ lễ thật vui vẻ, an lành bên gia đình!</b> 🎉`;
       card.classList.add('show');
+      document.body.classList.add('finale');
       petalRain();
     }, 2100);
   }
