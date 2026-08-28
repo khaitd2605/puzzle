@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Băng Lấp Hố</title>
+<style>
+  :root {
+    --ink: #1a140e;
+    --paper: #f7f6f2;
+    --hole: #8e8c88;
+    --hole-dark: #75736f;
+    --ice: #e9edee;
+    --ice-side: #cfd6d8;
+    --cream: #f0ead9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #d9d7d2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    overflow: hidden;
+    touch-action: none;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 150px 45px rgba(30, 28, 25, 0.55);
+  }
+  #stage { width: 100%; max-width: 860px; padding: 8px; }
+  svg { display: block; width: 100%; height: auto; }
+
+  .hud {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    z-index: 5;
+    flex-wrap: wrap;
+  }
+  .hud a, .hud button, .hud .stat {
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border: 3px solid var(--ink);
+    border-radius: 10px;
+    background: var(--cream);
+    color: var(--ink);
+    cursor: pointer;
+    text-decoration: none;
+    box-shadow: 0 3px 0 rgba(0,0,0,0.3);
+  }
+  .hud .stat { cursor: default; }
+  .levels { display: flex; gap: 6px; }
+  .levels button { padding: 7px 12px; opacity: 0.55; }
+  .levels button.active { opacity: 1; background: #d9e8b8; }
+
+  .cube { cursor: grab; transition: transform 0.2s cubic-bezier(0.25, 0.9, 0.35, 1); will-change: transform; }
+  .cube:active { cursor: grabbing; }
+  .cube .body { transform-box: fill-box; transform-origin: center; transition: transform 0.22s, opacity 0.22s; }
+  .cube.fall .body { transform: scale(0.8); opacity: 0; }
+  .cube.bump .body { animation: bump 0.18s ease-out; }
+  @keyframes bump {
+    0%, 100% { transform: translate(0, 0); }
+    40% { transform: translate(0, -4px); }
+  }
+  .holefill { opacity: 0; transition: opacity 0.25s; }
+  .holefill.show { opacity: 1; }
+
+  #overlay {
+    position: fixed; inset: 0;
+    background: rgba(30, 28, 25, 0.55);
+    display: none; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  #overlay.show { display: flex; }
+  #overlay .card {
+    background: var(--cream);
+    border: 5px solid var(--ink);
+    border-radius: 14px;
+    padding: 36px 48px;
+    text-align: center;
+    animation: pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  @keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  #overlay h1 { font-size: 30px; margin-bottom: 8px; }
+  #overlay p { font-size: 17px; margin-bottom: 20px; }
+  #overlay button {
+    font: inherit; font-weight: 600;
+    padding: 8px 18px;
+    border: 3px solid var(--ink); border-radius: 10px;
+    background: white; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div class="hud">
+  <a href="index.html">🏠 Menu</a>
+  <button id="btn-undo">↩ Undo</button>
+  <button id="btn-reset">⟲ Reset</button>
+  <div class="stat">Đẩy: <span id="move-count">0</span></div>
+  <div class="levels" id="level-btns"></div>
+</div>
+
+<div id="stage">
+  <svg id="scene"></svg>
+</div>
+
+<div id="overlay">
+  <div class="card">
+    <h1>🧊 Lấp kín các hố!</h1>
+    <p>Anh giải trong <b><span id="final-moves">0</span></b> lần đẩy (tối thiểu: <span id="min-moves">1</span>)</p>
+    <button id="btn-again">Chơi lại</button>
+    <button id="btn-next">Level tiếp →</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const SVG = 'http://www.w3.org/2000/svg';
+  const scene = document.getElementById('scene');
+  const INSTANT = location.hash === '#autotest';
+
+  // =====================================================================
+  // Levels — the five original ice-block boards from Rusty Lake Paradise
+  // plague 7 (Hail), reconstructed frame-by-frame from the walkthrough
+  // video. Push a cube: it slides until it falls into an EMPTY hole or
+  // stops against a raised cube. Filled holes are slid over. A push that
+  // would send the cube off into the void is invalid.
+  // Coordinates are [col, row]. All BFS-verified; solution = optimal.
+  // =====================================================================
+  const LEVELS = [
+    {
+      name: '1', min: 3,
+      holes: [[0, 0], [2, 0], [1, 1]],
+      ice: [[1, 0], [0, 1], [2, 1]],
+      solution: [[[1, 0], 'D'], [[0, 1], 'U'], [[2, 1], 'U']],
+    },
+    {
+      name: '2', min: 4,
+      holes: [[3, 0], [1, 1], [2, 1], [3, 1]],
+      ice: [[0, 1], [4, 1], [1, 2], [3, 2]],
+      solution: [[[4, 1], 'L'], [[1, 2], 'U'], [[0, 1], 'R'], [[3, 2], 'U']],
+    },
+    {
+      name: '3', min: 6,
+      holes: [[2, 0], [3, 0], [3, 1], [1, 2], [2, 2], [3, 2]],
+      ice: [[4, 0], [4, 1], [0, 2], [1, 3], [2, 3], [3, 3]],
+      solution: [[[4, 0], 'L'], [[4, 1], 'L'], [[1, 3], 'U'], [[0, 2], 'R'], [[2, 3], 'U'], [[3, 3], 'U']],
+    },
+    {
+      name: '4', min: 7,
+      holes: [[1, 1], [2, 1], [1, 2], [2, 2], [3, 2], [1, 3], [2, 3]],
+      ice: [[1, 0], [2, 0], [0, 1], [0, 2], [0, 3], [1, 4], [2, 4]],
+      solution: [[[1, 0], 'D'], [[0, 1], 'R'], [[2, 0], 'D'], [[0, 3], 'R'], [[1, 4], 'U'], [[0, 2], 'R'], [[2, 4], 'U']],
+    },
+    {
+      name: '5', min: 6,
+      holes: [[1, 1], [2, 1], [0, 2], [1, 2], [0, 3], [0, 4]],
+      ice: [[1, 0], [2, 0], [0, 1], [3, 1], [2, 2], [1, 3]],
+      solution: [[[2, 0], 'D'], [[3, 1], 'L'], [[1, 0], 'D'], [[2, 2], 'L'], [[1, 3], 'L'], [[0, 1], 'D']],
+    },
+  ];
+  const DIRS = { U: [0, -1], D: [0, 1], L: [-1, 0], R: [1, 0] };
+  const CELL = 96, MARGIN = 90;
+
+  function el(name, attrs, parent = scene) {
+    const e = document.createElementNS(SVG, name);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  }
+  const rnd = s => { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x); };
+  const key = c => c[0] + ',' + c[1];
+
+  // ---- state ----
+  let levelIdx = 0, L = null;
+  let cubes, filled, moves, history, busy;
+  let cubeEls, holeFillEls, bounds;
+  const moveCountEl = document.getElementById('move-count');
+  const finalMovesEl = document.getElementById('final-moves');
+  const minMovesEl = document.getElementById('min-moves');
+  const overlay = document.getElementById('overlay');
+  const btnNext = document.getElementById('btn-next');
+  const levelBtnsEl = document.getElementById('level-btns');
+
+  const px = c => [MARGIN + c[0] * CELL + CELL / 2, MARGIN + c[1] * CELL + CELL / 2];
+
+  // slightly wobbly hand-drawn rect path
+  function sketchRect(w, h, seed) {
+    const j = i => (rnd(seed + i) - 0.5) * 3;
+    const x0 = -w / 2, y0 = -h / 2, x1 = w / 2, y1 = h / 2;
+    return `M ${x0 + j(1)} ${y0 + j(2)} L ${x1 + j(3)} ${y0 + j(4)} L ${x1 + j(5)} ${y1 + j(6)} L ${x0 + j(7)} ${y1 + j(8)} Z`;
+  }
+
+  function holeSVG(g, seed) {
+    el('path', {
+      d: sketchRect(64, 46, seed),
+      fill: 'var(--hole)', stroke: 'var(--ink)', 'stroke-width': 5, 'stroke-linejoin': 'round',
+    }, g);
+    el('line', { x1: -30, y1: -2, x2: 30, y2: -1, stroke: 'var(--hole-dark)', 'stroke-width': 5 }, g);
+    el('path', { d: 'M -30 -21 L 30 -21', stroke: 'rgba(0,0,0,0.25)', 'stroke-width': 8 }, g);
+    // the flat ice slab shown once the hole is filled
+    const f = el('g', { class: 'holefill' }, g);
+    el('path', {
+      d: sketchRect(62, 44, seed + 50),
+      fill: 'var(--ice-side)', stroke: 'var(--ink)', 'stroke-width': 4.5, 'stroke-linejoin': 'round',
+    }, f);
+    el('path', { d: `M -28 ${6 + rnd(seed) * 6} q 28 ${rnd(seed + 2) * 8 - 4} 56 0`, fill: 'none', stroke: 'rgba(40,40,40,0.35)', 'stroke-width': 3 }, f);
+    return f;
+  }
+
+  function cubeSVG(g, seed) {
+    const b = el('g', { class: 'body' }, g);
+    el('path', {
+      d: sketchRect(64, 62, seed),
+      fill: 'var(--ice)', stroke: 'var(--ink)', 'stroke-width': 5.5, 'stroke-linejoin': 'round',
+    }, b);
+    // top face highlight
+    el('path', {
+      d: `M -29 -26 L 29 -26 L 28 ${-8 + rnd(seed + 3) * 6} L -28 ${-6 + rnd(seed + 4) * 6} Z`,
+      fill: 'rgba(255,255,255,0.75)',
+    }, b);
+    // frost crack line
+    el('path', {
+      d: `M -28 ${12 + rnd(seed + 5) * 8} q 30 ${rnd(seed + 6) * 10 - 5} 56 ${rnd(seed + 7) * 6 - 3}`,
+      fill: 'none', stroke: 'rgba(40,45,50,0.55)', 'stroke-width': 3, 'stroke-linecap': 'round',
+    }, b);
+    return b;
+  }
+
+  function loadLevel(i) {
+    levelIdx = i;
+    L = LEVELS[i];
+    const all = [...L.holes, ...L.ice];
+    const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+    bounds = {
+      x0: Math.min(...xs) - 2, x1: Math.max(...xs) + 2,
+      y0: Math.min(...ys) - 2, y1: Math.max(...ys) + 2,
+    };
+    const W = (Math.max(...xs) + 1) * CELL + MARGIN * 2;
+    const H = (Math.max(...ys) + 1) * CELL + MARGIN * 2;
+    scene.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    scene.innerHTML = '';
+    el('rect', { x: 0, y: 0, width: W, height: H, rx: 30, fill: 'var(--paper)' });
+    for (let k = 0; k < 10; k++) {
+      el('ellipse', {
+        cx: rnd(k * 3 + 1) * W, cy: rnd(k * 5 + 2) * H,
+        rx: 40 + rnd(k + 3) * 90, ry: 25 + rnd(k + 4) * 50,
+        fill: 'rgba(120,120,125,0.05)',
+      });
+    }
+
+    holeFillEls = {};
+    L.holes.forEach((h, j) => {
+      const [x, y] = px(h);
+      const g = el('g', { transform: `translate(${x} ${y})` });
+      holeFillEls[key(h)] = holeSVG(g, i * 31 + j * 7);
+    });
+
+    cubeEls = {};
+    cubes = new Map();
+    L.ice.forEach((c, j) => {
+      const g = el('g', { class: 'cube' });
+      cubeSVG(g, i * 17 + j * 11 + 3);
+      const [x, y] = px(c);
+      g.style.transition = 'none';
+      g.style.transform = `translate(${x}px, ${y}px)`;
+      g.getBoundingClientRect();
+      g.style.transition = '';
+      attachDrag(g, j);
+      cubeEls[j] = g;
+      cubes.set(j, c.slice());
+    });
+
+    filled = new Set();
+    moves = 0;
+    history = [];
+    busy = false;
+    overlay.classList.remove('show');
+    moveCountEl.textContent = '0';
+    minMovesEl.textContent = L.min;
+    btnNext.style.display = i + 1 < LEVELS.length ? '' : 'none';
+    [...levelBtnsEl.children].forEach((b, j) => b.classList.toggle('active', j === i));
+  }
+
+  // ---- push logic (mirrors the verified solver) ----
+  function computeSlide(id, dn) {
+    const [dx, dy] = DIRS[dn];
+    let [x, y] = cubes.get(id);
+    let steps = 0;
+    const occupied = c => [...cubes.values()].some(p => p && p[0] === c[0] && p[1] === c[1]);
+    const isEmptyHole = c => L.holes.some(h => h[0] === c[0] && h[1] === c[1]) && !filled.has(key(c));
+    for (;;) {
+      const n = [x + dx, y + dy];
+      if (n[0] < bounds.x0 || n[0] > bounds.x1 || n[1] < bounds.y0 || n[1] > bounds.y1) return null;
+      if (occupied(n)) return steps > 0 ? { to: [x, y], fell: false } : null;
+      if (isEmptyHole(n)) return { to: n, fell: true };
+      x = n[0]; y = n[1]; steps++;
+    }
+  }
+
+  function push(id, dn) {
+    if (busy || overlay.classList.contains('show')) return false;
+    if (!cubes.get(id)) return false;
+    const res = computeSlide(id, dn);
+    if (!res) return false;
+
+    history.push({
+      cubes: new Map([...cubes].map(([k, v]) => [k, v && v.slice()])),
+      filled: new Set(filled),
+      moves,
+    });
+    moves++;
+    moveCountEl.textContent = moves;
+
+    const g = cubeEls[id];
+    const [tx, ty] = px(res.to);
+    busy = true;
+    const finish = () => {
+      if (res.fell) {
+        filled.add(key(res.to));
+        cubes.set(id, null);
+        const done2 = () => {
+          g.style.display = 'none';
+          holeFillEls[key(res.to)].classList.add('show');
+          busy = false;
+          checkWin();
+        };
+        if (INSTANT) done2();
+        else { g.classList.add('fall'); setTimeout(done2, 240); }
+      } else {
+        cubes.set(id, res.to);
+        busy = false;
+      }
+    };
+    if (INSTANT) { g.style.transform = `translate(${tx}px, ${ty}px)`; finish(); }
+    else {
+      const cellsMoved = Math.abs(res.to[0] - cubes.get(id)[0]) + Math.abs(res.to[1] - cubes.get(id)[1]);
+      g.style.transitionDuration = (0.1 + cellsMoved * 0.06) + 's';
+      g.style.transform = `translate(${tx}px, ${ty}px)`;
+      setTimeout(finish, 120 + cellsMoved * 60);
+    }
+    return true;
+  }
+
+  function checkWin() {
+    if (filled.size !== L.holes.length) return;
+    finalMovesEl.textContent = moves;
+    if (INSTANT) overlay.classList.add('show');
+    else setTimeout(() => overlay.classList.add('show'), 450);
+  }
+
+  function bump(id) {
+    const g = cubeEls[id];
+    g.classList.remove('bump');
+    void g.getBoundingClientRect();
+    g.classList.add('bump');
+  }
+
+  function undo() {
+    if (busy || !history.length || overlay.classList.contains('show')) return;
+    const s = history.pop();
+    cubes = s.cubes;
+    filled = s.filled;
+    moves = s.moves;
+    moveCountEl.textContent = moves;
+    for (const [id, c] of cubes) {
+      const g = cubeEls[id];
+      if (c) {
+        g.style.display = '';
+        g.classList.remove('fall');
+        const [x, y] = px(c);
+        g.style.transitionDuration = '0s';
+        g.style.transform = `translate(${x}px, ${y}px)`;
+        g.getBoundingClientRect();
+        g.style.transitionDuration = '';
+      } else g.style.display = 'none';
+    }
+    for (const h of L.holes)
+      holeFillEls[key(h)].classList.toggle('show', filled.has(key(h)));
+  }
+
+  // ---- input: drag a cube toward a direction ----
+  function attachDrag(g, id) {
+    let sx = 0, sy = 0, tracking = false;
+    g.addEventListener('pointerdown', e => {
+      tracking = true; sx = e.clientX; sy = e.clientY;
+      g.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    g.addEventListener('pointermove', e => {
+      if (!tracking) return;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 18) return;
+      tracking = false;
+      const dn = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'R' : 'L') : (dy > 0 ? 'D' : 'U');
+      if (!push(id, dn)) bump(id);
+    });
+    const stop = () => { tracking = false; };
+    g.addEventListener('pointerup', stop);
+    g.addEventListener('pointercancel', stop);
+  }
+
+  // ---- wiring ----
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-reset').addEventListener('click', () => loadLevel(levelIdx));
+  document.getElementById('btn-again').addEventListener('click', () => loadLevel(levelIdx));
+  btnNext.addEventListener('click', () => loadLevel(Math.min(levelIdx + 1, LEVELS.length - 1)));
+  LEVELS.forEach((lv, i) => {
+    const b = document.createElement('button');
+    b.textContent = lv.name;
+    b.addEventListener('click', () => loadLevel(i));
+    levelBtnsEl.appendChild(b);
+  });
+
+  loadLevel(0);
+
+  // ---- self-test: replay every level's optimal solution ----
+  if (INSTANT) {
+    let wins = 0;
+    for (let i = 0; i < LEVELS.length; i++) {
+      loadLevel(i);
+      for (const [cell, dn] of LEVELS[i].solution) {
+        let id = null;
+        for (const [j, c] of cubes) if (c && c[0] === cell[0] && c[1] === cell[1]) { id = j; break; }
+        if (id === null || !push(id, dn)) break;
+      }
+      if (filled.size === LEVELS[i].holes.length && moves === LEVELS[i].min) wins++;
+    }
+    document.body.dataset.testResult = wins === LEVELS.length
+      ? 'WIN levels=' + wins
+      : 'FAIL wins=' + wins;
+  }
+})();
+</script>
+</body>
+</html>
