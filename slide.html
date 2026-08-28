@@ -52,6 +52,9 @@
   }
   .hud button:active { transform: translateY(2px); box-shadow: none; }
   .hud .btn-link { text-decoration: none; display: inline-block; }
+  .levels { display: flex; gap: 6px; }
+  .levels button { padding: 8px 13px; opacity: 0.55; }
+  .levels button.active { opacity: 1; background: #d9e8b8; }
   .hud button:disabled { opacity: 0.4; cursor: default; }
 
   #board {
@@ -118,6 +121,7 @@
   <button id="btn-undo">↩ Undo</button>
   <div class="moves">Nước đi: <span id="move-count">0</span></div>
   <button id="btn-reset">⟲ Reset</button>
+  <div class="levels" id="level-btns"></div>
 </div>
 
 <div id="board"></div>
@@ -125,8 +129,9 @@
 <div id="overlay">
   <div class="card">
     <h1>🎉 Hoàn thành!</h1>
-    <p>Anh giải trong <b><span id="final-moves">0</span></b> nước (tối thiểu: 11)</p>
+    <p>Anh giải trong <b><span id="final-moves">0</span></b> nước (tối thiểu: <span id="min-moves">11</span>)</p>
     <button id="btn-again">Chơi lại</button>
+    <button id="btn-next">Level tiếp →</button>
   </div>
 </div>
 
@@ -134,26 +139,47 @@
 (() => {
   const N = 5;
 
-  // ---- Level data (read from the original screenshot) ----
-  // pieces: id, shape, start [row, col]
-  const LEVEL = {
-    pieces: [
-      { id: 'diamond', shape: 'diamond', at: [0, 0] },
-      { id: 'spiky',   shape: 'spiky',   at: [1, 4] },
-      { id: 'ring',    shape: 'ring',    at: [2, 2] },
-      { id: 'star',    shape: 'star',    at: [4, 1] },
-      { id: 'square',  shape: 'square',  at: [4, 4] },
-    ],
-    // targets: which piece must reach which cell (every piece has one;
-    // the diagonal pieces start on their targets)
-    targets: [
-      { piece: 'diamond', at: [0, 0] },
-      { piece: 'star',    at: [1, 1] },
-      { piece: 'ring',    at: [2, 2] },
-      { piece: 'spiky',   at: [3, 3] },
-      { piece: 'square',  at: [4, 4] },
-    ],
-  };
+  // ---- Level data ----
+  // pieces: id, shape, start [row, col] — same starts for every level
+  const PIECES = [
+    { id: 'diamond', shape: 'diamond', at: [0, 0] },
+    { id: 'spiky',   shape: 'spiky',   at: [1, 4] },
+    { id: 'ring',    shape: 'ring',    at: [2, 2] },
+    { id: 'star',    shape: 'star',    at: [4, 1] },
+    { id: 'square',  shape: 'square',  at: [4, 4] },
+  ];
+  // Each level = a target assignment. All verified solvable by BFS;
+  // min is the optimal move count and solution replays it (autotest).
+  const LEVELS = [
+    {
+      name: '1', min: 11,
+      targets: { diamond: [0, 0], star: [1, 1], ring: [2, 2], spiky: [3, 3], square: [4, 4] },
+      solution: 'spiky:U spiky:L diamond:D star:U diamond:R square:U spiky:R spiky:D diamond:L diamond:U square:D',
+    },
+    {
+      name: '2', min: 14,
+      targets: { diamond: [4, 4], spiky: [2, 2], ring: [2, 4], star: [2, 0], square: [0, 0] },
+      solution: 'diamond:R star:L square:U spiky:L spiky:D ring:R square:U square:L diamond:D spiky:U spiky:R ring:R star:U square:U',
+    },
+    {
+      name: '3', min: 17,
+      targets: { diamond: [2, 4], spiky: [3, 2], ring: [1, 2], star: [2, 0], square: [0, 0] },
+      solution: 'diamond:R ring:U diamond:L square:L diamond:D spiky:D square:U diamond:L diamond:U spiky:L spiky:U star:L square:L ring:D diamond:R star:U square:U',
+    },
+    {
+      name: '4', min: 20,
+      targets: { diamond: [3, 3], spiky: [2, 4], ring: [1, 1], star: [3, 2], square: [1, 3] },
+      solution: 'diamond:D spiky:U ring:U square:U spiky:L spiky:D star:R star:U diamond:R ring:L square:L spiky:U spiky:L ring:D spiky:R ring:R star:D diamond:R diamond:U diamond:L',
+    },
+  ];
+  let levelIdx = 0;
+  let LEVEL = null; // assembled by loadLevel()
+  function assembleLevel(i) {
+    return {
+      pieces: PIECES,
+      targets: Object.entries(LEVELS[i].targets).map(([piece, at]) => ({ piece, at })),
+    };
+  }
 
   // ---- SVG symbols (hand-drawn style of the original) ----
   // Each returns inner SVG for a 100x100 viewBox.
@@ -380,26 +406,52 @@
     el.addEventListener('pointercancel', stop);
   }
 
+  // ---- Level switching ----
+  const levelBtnsEl = document.getElementById('level-btns');
+  const minMovesEl = document.getElementById('min-moves');
+  const btnNext = document.getElementById('btn-next');
+
+  function loadLevel(i) {
+    levelIdx = i;
+    LEVEL = assembleLevel(i);
+    state = Object.fromEntries(LEVEL.pieces.map(p => [p.id, p.at.slice()]));
+    buildBoard();
+    reset();
+    minMovesEl.textContent = LEVELS[i].min;
+    btnNext.style.display = i + 1 < LEVELS.length ? '' : 'none';
+    [...levelBtnsEl.children].forEach((b, j) => b.classList.toggle('active', j === i));
+  }
+  LEVELS.forEach((L, i) => {
+    const b = document.createElement('button');
+    b.textContent = L.name;
+    b.addEventListener('click', () => loadLevel(i));
+    levelBtnsEl.appendChild(b);
+  });
+
   // ---- Wire up ----
   document.getElementById('btn-reset').addEventListener('click', reset);
   document.getElementById('btn-undo').addEventListener('click', undo);
   document.getElementById('btn-again').addEventListener('click', reset);
+  btnNext.addEventListener('click', () => loadLevel(Math.min(levelIdx + 1, LEVELS.length - 1)));
   window.addEventListener('resize', () => { buildBoard(); renderPositions(false); });
 
-  state = Object.fromEntries(LEVEL.pieces.map(p => [p.id, p.at.slice()]));
-  buildBoard();
+  loadLevel(0);
 
-  // self-test: open with #autotest to replay the known 7-move solution
+  // self-test: open with #autotest to replay every level's optimal solution
   if (location.hash === '#autotest') {
-    const solution = [
-      ['spiky', -1, 0], ['spiky', 0, -1], ['diamond', 1, 0], ['star', -1, 0],
-      ['diamond', 0, 1], ['square', -1, 0], ['spiky', 0, 1], ['spiky', 1, 0],
-      ['diamond', 0, -1], ['diamond', -1, 0], ['square', 1, 0],
-    ];
-    for (const [id, dr, dc] of solution) tryMove(id, dr, dc);
-    document.body.dataset.testResult = won
-      ? 'WIN moves=' + moves
-      : 'FAIL state=' + JSON.stringify(state);
+    const D = { U: [-1, 0], D: [1, 0], L: [0, -1], R: [0, 1] };
+    let wins = 0;
+    for (let i = 0; i < LEVELS.length; i++) {
+      loadLevel(i);
+      for (const step of LEVELS[i].solution.split(' ')) {
+        const [id, d] = step.split(':');
+        tryMove(id, D[d][0], D[d][1]);
+      }
+      if (won && moves === LEVELS[i].min) wins++;
+    }
+    document.body.dataset.testResult = wins === LEVELS.length
+      ? 'WIN levels=' + wins
+      : 'FAIL wins=' + wins;
   }
 })();
 </script>
