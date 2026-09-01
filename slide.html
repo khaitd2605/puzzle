@@ -29,8 +29,12 @@
   }
   .hud {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     align-items: center;
     gap: 12px;
+    max-width: 100%;
+    padding: 0 12px;
     user-select: none;
   }
   .hud .moves {
@@ -59,6 +63,7 @@
 
   #board {
     position: relative;
+    box-sizing: content-box; /* JS sets width to the exact grid size; keep the 5px border outside it */
     background: var(--cream);
     border: 5px solid var(--ink);
     border-radius: 6px;
